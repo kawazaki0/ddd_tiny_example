@@ -119,16 +119,16 @@ class TodoService:
         self.todo_policy = todo_policy
 
     async def create_todo(self, title: str) -> TodoDTO:
-        try:
-            todo = Todo(title=title)
-        except InvalidTodoException as e:
-            raise ValidationError(str(e)) from e
-
         count = await self.repository.count_all()
         try:
             self.todo_policy.enforce_limit(count)
         except TodoLimitReachedException as e:
             raise BusinessRuleViolation(str(e)) from e
+
+        try:
+            todo = Todo(title=title)
+        except InvalidTodoException as e:
+            raise ValidationError(str(e)) from e
 
         saved = await self.repository.save(todo)
         return TodoDTO(id=saved.id, title=saved.title)
