@@ -6,8 +6,7 @@
 #    'uvicorn[standard]',
 # ]
 # ///
-import abc
-from abc import ABC
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from uuid import UUID, uuid4
 
@@ -49,8 +48,8 @@ class TodoPolicy:
 
     MAX_TODOS_PER_USER = 10
 
-    @staticmethod
-    def enforce_limit(current_todo_count: int) -> None:
+    @classmethod
+    def enforce_limit(cls, current_todo_count: int) -> None:
         if current_todo_count >= TodoPolicy.MAX_TODOS_PER_USER:
             raise TodoLimitReachedException("Cannot create more todos, limit reached")
 
@@ -58,13 +57,15 @@ class TodoPolicy:
 class TodoRepository(ABC):
     """Persistence abstraction - interface only"""
 
-    @abc.abstractmethod
+    @abstractmethod
     async def save(self, todo: Todo) -> Todo:
         pass
 
-    @abc.abstractmethod
+    @abstractmethod
     async def count_all(self) -> int:
         pass
+
+    # ... implement also get(), update(), delete(), list() if needed
 
 
 # ============================================================================
@@ -119,19 +120,18 @@ class TodoService:
         self.todo_policy = todo_policy
 
     async def create_todo(self, title: str) -> TodoDTO:
-        count = await self.repository.count_all()
         try:
+            count = await self.repository.count_all()
             self.todo_policy.enforce_limit(count)
+
+            todo = Todo(title=title)
+
+            saved = await self.repository.save(todo)
+            return TodoDTO(id=saved.id, title=saved.title)
         except TodoLimitReachedException as e:
             raise BusinessRuleViolation(str(e)) from e
-
-        try:
-            todo = Todo(title=title)
         except InvalidTodoException as e:
             raise ValidationError(str(e)) from e
-
-        saved = await self.repository.save(todo)
-        return TodoDTO(id=saved.id, title=saved.title)
 
 
 # ============================================================================
@@ -154,8 +154,11 @@ todo_service = create_service_container()
 @app.post("/todos", status_code=201)
 async def create_todo(request: dict):
     """HTTP endpoint - translates external requests to domain language"""
+    title = request.get("title")  # Better
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required")
     try:
-        todo = await todo_service.create_todo(request["title"])
+        todo = await todo_service.create_todo(title)
         return {
             "id": todo.id,
             "title": todo.title,
@@ -167,6 +170,9 @@ async def create_todo(request: dict):
 
 
 if __name__ == "__main__":
+    """
+    curl http://127.0.0.1:8000/todos -H 'Content-type: application/json' -d '{"title": "example"}'
+    """
     import uvicorn
 
-    uvicorn.run("ex:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("service_layer:app", host="127.0.0.1", port=8000, reload=True)
